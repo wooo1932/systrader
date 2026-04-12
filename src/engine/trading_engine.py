@@ -225,12 +225,57 @@ class TradingEngine:
                 "code": worker.stock_code, "trade_id": worker.trade_id,
                 "pnl_pct": worker.pnl_pct,
             })
+            self._update_daily_stats(worker)
             self._unsubscribe_tick(worker.stock_code)
 
         elif new == WorkerState.CANCELLED and worker.trade_id:
             self.db.trades.update(worker.trade_id,
                 sell_reason=worker.sell_reason, status="cancelled")
             self._unsubscribe_tick(worker.stock_code)
+
+    def _update_daily_stats(self, worker) -> None:
+        today = time.strftime("%Y-%m-%d")
+        rows = self.db.daily_stats.get_range(date_from=today, date_to=today)
+
+        pnl_amount = worker.pnl_amount
+        pnl_pct = worker.pnl_pct
+        hold_seconds = worker.hold_seconds
+        is_win = pnl_amount > 0
+
+        if rows:
+            s = rows[0]
+            total_trades = s["total_trades"] + 1
+            win_count = s["win_count"] + (1 if is_win else 0)
+            loss_count = s["loss_count"] + (0 if is_win else 1)
+            total_pnl = s["total_pnl"] + pnl_amount
+            # Recalculate average pnl_pct as running average
+            avg_pnl_pct = (s["avg_pnl_pct"] * s["total_trades"] + pnl_pct) / total_trades
+            best_trade_pnl = max(s["best_trade_pnl"], pnl_amount)
+            worst_trade_pnl = min(s["worst_trade_pnl"], pnl_amount)
+            avg_hold_seconds = (s["avg_hold_seconds"] * s["total_trades"] + hold_seconds) / total_trades
+            win_rate = win_count / total_trades if total_trades > 0 else 0.0
+        else:
+            total_trades = 1
+            win_count = 1 if is_win else 0
+            loss_count = 0 if is_win else 1
+            total_pnl = pnl_amount
+            avg_pnl_pct = pnl_pct
+            best_trade_pnl = pnl_amount
+            worst_trade_pnl = pnl_amount
+            avg_hold_seconds = hold_seconds
+            win_rate = 1.0 if is_win else 0.0
+
+        self.db.daily_stats.upsert(today,
+            total_trades=total_trades,
+            win_count=win_count,
+            loss_count=loss_count,
+            win_rate=win_rate,
+            total_pnl=total_pnl,
+            avg_pnl_pct=avg_pnl_pct,
+            best_trade_pnl=best_trade_pnl,
+            worst_trade_pnl=worst_trade_pnl,
+            avg_hold_seconds=avg_hold_seconds,
+        )
 
     @property
     def active_worker_count(self) -> int:
