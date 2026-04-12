@@ -77,6 +77,11 @@ def main():
         except Exception as e:
             log.error(f"Account init failed: {e}")
 
+    balance = None
+    if connection.is_connected and account:
+        from src.com.balance import CybosBalance
+        balance = CybosBalance(connection, account.account_number, account.goods_code)
+
     # 6. Stock tick manager
     stock_mst = StockMst(connection)
 
@@ -153,7 +158,7 @@ def main():
     # 12. Start web server
     context = {
         "db": db, "event_bus": event_bus, "command_queue": command_queue,
-        "connection": connection, "account": account, "engine": engine,
+        "connection": connection, "account": account, "engine": engine, "balance": balance,
         "telegram_news": telegram_news, "settings": settings,
         "settings_path": settings_path, "log_dir": settings.logging.dir,
     }

@@ -54,6 +54,56 @@ async def launch_cybos():
     return {"status": "error", "message": "settings not available"}
 
 
+@router.get("/reconciliation")
+async def get_reconciliation():
+    ctx = get_context()
+    engine = ctx.get("engine")
+    balance = ctx.get("balance")
+
+    if not balance:
+        return {"error": "balance not available (CYBOS not connected)"}
+
+    broker_holdings = balance.get_holdings()
+    broker_map = {h["code"]: h for h in broker_holdings}
+
+    system_holdings = {}
+    if engine:
+        for code, worker in engine.workers.items():
+            if worker.state.value == "holding":
+                system_holdings[code] = {
+                    "code": code, "name": worker.stock_name,
+                    "quantity": worker.buy_qty, "price": worker.buy_price,
+                }
+
+    all_codes = set(broker_map.keys()) | set(system_holdings.keys())
+    discrepancies = []
+    for code in all_codes:
+        broker = broker_map.get(code)
+        system = system_holdings.get(code)
+        if broker and not system:
+            discrepancies.append({
+                "code": code, "name": broker["name"], "type": "broker_only",
+                "broker_qty": broker["quantity"], "system_qty": 0,
+            })
+        elif system and not broker:
+            discrepancies.append({
+                "code": code, "name": system["name"], "type": "system_only",
+                "broker_qty": 0, "system_qty": system["quantity"],
+            })
+        elif broker["quantity"] != system["quantity"]:
+            discrepancies.append({
+                "code": code, "name": broker["name"], "type": "qty_mismatch",
+                "broker_qty": broker["quantity"], "system_qty": system["quantity"],
+            })
+
+    return {
+        "broker_holdings": broker_holdings,
+        "system_holdings": list(system_holdings.values()),
+        "discrepancies": discrepancies,
+        "matched": len(discrepancies) == 0,
+    }
+
+
 @router.post("/telegram/auth-code")
 async def telegram_auth_code(body: dict):
     ctx = get_context()
