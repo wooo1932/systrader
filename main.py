@@ -133,6 +133,7 @@ def main():
         alert_bot.start()
         event_bus.subscribe("buy_filled", alert_bot.on_buy_filled)
         event_bus.subscribe("sell_filled", alert_bot.on_sell_filled)
+        event_bus.subscribe("trade_done", alert_bot.on_trade_done)
 
     # 11. News buffer for API
     register_news_buffer(event_bus)
