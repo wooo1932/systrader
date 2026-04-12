@@ -222,8 +222,8 @@ class TradingEngine:
                 "reason": worker.sell_reason, "trade_id": worker.trade_id,
             })
             self.event_bus.publish("trade_done", {
-                "code": worker.stock_code, "trade_id": worker.trade_id,
-                "pnl_pct": worker.pnl_pct,
+                "code": worker.stock_code, "name": worker.stock_name,
+                "trade_id": worker.trade_id, "pnl_pct": worker.pnl_pct,
             })
             self._update_daily_stats(worker)
             self._unsubscribe_tick(worker.stock_code)
