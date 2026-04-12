@@ -1,8 +1,11 @@
 from __future__ import annotations
 import asyncio
+import logging
 import threading
 from collections import defaultdict
 from typing import Callable
+
+log = logging.getLogger(__name__)
 
 
 class EventBus:
@@ -32,16 +35,16 @@ class EventBus:
         for cb in callbacks:
             try:
                 cb(data)
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("Event callback error on '%s': %s", event_type, e)
         for q in queues:
             try:
                 if self._async_loop and self._async_loop.is_running():
                     self._async_loop.call_soon_threadsafe(q.put_nowait, data)
                 else:
                     q.put_nowait(data)
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("Event queue error on '%s': %s", event_type, e)
 
     async def wait_event(self, event_type: str) -> dict:
         q: asyncio.Queue = asyncio.Queue()

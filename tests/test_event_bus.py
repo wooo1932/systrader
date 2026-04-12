@@ -65,3 +65,14 @@ def test_async_wait_event():
         data = await asyncio.wait_for(bus.wait_event("async_evt"), timeout=1.0)
         assert data["val"] == 42
     asyncio.run(run())
+
+
+def test_publish_logs_callback_error(caplog):
+    import logging
+    bus = EventBus()
+    def bad_callback(data):
+        raise ValueError("boom")
+    bus.subscribe("err", bad_callback)
+    with caplog.at_level(logging.WARNING):
+        bus.publish("err", {"x": 1})
+    assert any("boom" in r.message for r in caplog.records)
