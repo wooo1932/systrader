@@ -103,6 +103,18 @@ def main():
     # Wire news -> engine
     event_bus.subscribe("news_detected", engine.on_news)
 
+    # 7b. CYBOS conclusion (fill) events
+    conclusion_mgr = None
+    if connection.is_connected and order:
+        from src.com.conclusion import ConclusionManager
+
+        def on_conclusion(data):
+            code = data["code"]
+            engine.on_fill(code, data["side"], data["price"], data["quantity"])
+
+        conclusion_mgr = ConclusionManager(callback=on_conclusion)
+        conclusion_mgr.start()
+
     # 8. CYBOS news source
     cybos_news = None
     if connection.is_connected:
@@ -189,6 +201,8 @@ def main():
         stock_cur_manager.unsubscribe_all()
         if cybos_news:
             cybos_news.stop()
+        if conclusion_mgr:
+            conclusion_mgr.stop()
         db.close()
         log.info("SysTrader stopped")
 
