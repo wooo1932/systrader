@@ -15,8 +15,7 @@ class TestConclusionHandler:
         ConclusionManager.callback = callback
 
         handler = ConclusionHandler.__new__(ConclusionHandler)
-        handler._obj = MagicMock()
-        handler._obj.GetHeaderValue = lambda idx: {
+        handler.GetHeaderValue = lambda idx: {
             0: "체결", 1: "A005930", 5: 50000, 6: 10, 12: "2", 14: 12345
         }.get(idx, "")
 
@@ -35,8 +34,7 @@ class TestConclusionHandler:
         ConclusionManager.callback = callback
 
         handler = ConclusionHandler.__new__(ConclusionHandler)
-        handler._obj = MagicMock()
-        handler._obj.GetHeaderValue = lambda idx: {
+        handler.GetHeaderValue = lambda idx: {
             0: "체결", 1: "A035720", 5: 120000, 6: 5, 12: "1", 14: 99999
         }.get(idx, "")
 
@@ -55,8 +53,7 @@ class TestConclusionHandler:
         ConclusionManager.callback = callback
 
         handler = ConclusionHandler.__new__(ConclusionHandler)
-        handler._obj = MagicMock()
-        handler._obj.GetHeaderValue = lambda idx: {
+        handler.GetHeaderValue = lambda idx: {
             0: "접수", 1: "A005930", 5: 50000, 6: 10, 12: "2", 14: 12345
         }.get(idx, "")
 
@@ -75,7 +72,7 @@ class TestConclusionManager:
         mgr = ConclusionManager(callback=cb)
         mgr.start()
 
-        mock_dispatch.assert_called_once_with("CpTrade.CpSvr8300", ConclusionHandler)
+        mock_dispatch.assert_called_once_with("DsCbo1.CpConclusion", ConclusionHandler)
         mock_obj.Subscribe.assert_called_once()
 
         mgr.stop()

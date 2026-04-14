@@ -101,10 +101,12 @@ class TradingEngine:
         if not code or code in self.workers:
             return
 
+        log.info(f"[ENGINE] Processing news: {code} ({name}) - {news_data.get('title', '')[:60]}")
+
         params = self.get_typed_params()
         info = self._stock_info_func(code)
         if not info:
-            log.warning(f"Stock info not available for {code}")
+            log.warning(f"[ENGINE] Stock info not available for {code}")
             return
 
         screener = Screener(
@@ -126,9 +128,10 @@ class TradingEngine:
         )
 
         if not result.passed:
-            log.info(f"Screener rejected {code} ({name}): {result.reason}")
+            log.info(f"[ENGINE] Screener rejected {code} ({name}): {result.reason}")
             return
 
+        log.info(f"[ENGINE] Screener passed {code} ({name}), creating worker...")
         trade_id = self.db.trades.create(
             stock_code=code, stock_name=name,
             news_source=news_data.get("source", ""),
@@ -149,7 +152,7 @@ class TradingEngine:
         self.workers[code] = worker
 
         self._subscribe_tick(code)
-        log.info(f"Worker created for {code} ({name}), trade_id={trade_id}")
+        log.info(f"[ENGINE] Worker created for {code} ({name}), trade_id={trade_id}, subscribing ticks")
         self.event_bus.publish("worker_state", {
             "code": code, "name": name, "state": "screening", "trade_id": trade_id
         })
@@ -178,10 +181,12 @@ class TradingEngine:
         worker.on_fill(side, price, quantity)
 
     def _handle_order(self, order_type: str, code: str, qty: int, price: int) -> None:
+        log.info(f"[ENGINE] Placing order: {order_type} {code} {qty}@{price}")
         try:
             self._order_func(order_type, code, qty, price)
+            log.info(f"[ENGINE] Order submitted: {order_type} {code} {qty}@{price}")
         except Exception as e:
-            log.error(f"Order failed for {code}: {e}")
+            log.error(f"[ENGINE] Order failed for {code}: {e}")
             worker = self.workers.get(code)
             if worker:
                 worker.cancel(f"order_error: {e}")

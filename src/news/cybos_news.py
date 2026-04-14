@@ -12,8 +12,8 @@ class CybosNewsHandler:
 
     def OnReceived(self):
         try:
-            code = self._obj.GetHeaderValue(1)
-            title = self._obj.GetHeaderValue(5)
+            code = self.GetHeaderValue(1)
+            title = self.GetHeaderValue(5)
             if CybosNewsHandler.callback:
                 CybosNewsHandler.callback(code, title)
         except Exception as e:
@@ -42,13 +42,15 @@ class CybosNewsSource:
     def _on_news(self, code: str, title: str) -> None:
         name = self._code_manager.code_to_name(code) or ""
         log.info(f"CYBOS news: [{code}] {name} - {title}")
+        ts = time.strftime("%Y-%m-%dT%H:%M:%S")
         self._event_bus.publish("news_feed", {
             "stock_code": code, "stock_name": name,
             "source": "cybos", "text": title,
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "timestamp": ts,
         })
-        if code and name:
+        if code and name and "단일판매" in title:
+            log.info(f"CYBOS 단일판매 detected: [{code}] {name}")
             self._event_bus.publish("news_detected", {
                 "code": code, "name": name, "source": "cybos",
-                "title": title, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "title": title, "timestamp": ts,
             })
