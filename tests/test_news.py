@@ -29,7 +29,7 @@ def make_code_manager(stocks=None):
 # ---------- CybosNewsSource ----------
 
 class TestCybosNewsSource:
-    def test_news_feed_receives_all_categories(self):
+    def test_news_feed_only_receives_disclosure(self):
         bus = EventBus()
         cm = make_code_manager()
         source = CybosNewsSource(bus, cm)
@@ -39,9 +39,8 @@ class TestCybosNewsSource:
         source._on_news("A005930", CATEGORY_NEWS, "삼성전자 일반 뉴스")
         source._on_news("A005930", CATEGORY_DISCLOSURE, "삼성전자 공시")
 
-        assert len(received) == 2
-        assert received[0]["category"] == "news"
-        assert received[1]["category"] == "disclosure"
+        assert len(received) == 1
+        assert received[0]["category"] == "disclosure"
 
     def test_detected_only_for_disclosure_with_keyword(self):
         bus = EventBus()
@@ -108,7 +107,7 @@ class TestCybosNewsSource:
         received = []
         bus.subscribe("news_feed", lambda d: received.append(d))
 
-        source._on_news("A005930", CATEGORY_NEWS, "test")
+        source._on_news("A005930", CATEGORY_DISCLOSURE, "test")
 
         ts = received[0]["timestamp"]
         assert len(ts) == 19  # YYYY-MM-DDTHH:MM:SS
@@ -185,6 +184,18 @@ class TestTelegramNewsSource:
         assert detected[0]["name"] == "삼성전자"
         assert detected[0]["source"] == "telegram"
 
+    def test_on_message_detects_stock_with_emoji(self):
+        bus = EventBus()
+        cm = make_code_manager()
+        source = self._make_source(bus=bus, cm=cm)
+        detected = []
+        bus.subscribe("news_detected", lambda d: detected.append(d))
+
+        source._on_message("✅ 삼성전자, 신규 투자 발표\nhttps://example.com", "뉴스채널")
+
+        assert len(detected) == 1
+        assert detected[0]["code"] == "A005930"
+
     def test_on_message_detects_multiple_stocks(self):
         bus = EventBus()
         cm = make_code_manager()
@@ -192,7 +203,7 @@ class TestTelegramNewsSource:
         detected = []
         bus.subscribe("news_detected", lambda d: detected.append(d))
 
-        source._on_message("삼성전자와 카카오 동반 상승", "뉴스채널")
+        source._on_message("삼성전자, 카카오 동반 상승", "뉴스채널")
 
         assert len(detected) == 2
         codes = {d["code"] for d in detected}

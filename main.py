@@ -105,8 +105,10 @@ def main():
         unsubscribe_tick_func=stock_cur_manager.unsubscribe,
     )
 
-    # Wire news -> engine
-    event_bus.subscribe("news_detected", engine.on_news)
+    # Wire news -> engine (queued to main thread for COM safety)
+    import queue as _queue
+    _news_queue: _queue.Queue = _queue.Queue()
+    event_bus.subscribe("news_detected", lambda data: _news_queue.put(data))
 
     # 7b. CYBOS conclusion (fill) events
     conclusion_mgr = None
@@ -223,6 +225,16 @@ def main():
 
             if command_queue.has_pending():
                 command_queue.process()
+
+            # Process queued news on main thread (COM-safe)
+            while not _news_queue.empty():
+                try:
+                    news_data = _news_queue.get_nowait()
+                    engine.on_news(news_data)
+                except _queue.Empty:
+                    break
+                except Exception as e:
+                    log.error(f"News processing error: {e}")
 
     except KeyboardInterrupt:
         log.info("Shutdown requested")

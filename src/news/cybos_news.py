@@ -45,25 +45,22 @@ class CybosNewsSource:
             log.info("CYBOS news unsubscribed")
 
     def _on_news(self, code: str, category: int, title: str) -> None:
-        category_name = "disclosure" if category == CATEGORY_DISCLOSURE else "news"
-
-        # Always publish to news_feed for display
-        name = self._code_manager.code_to_name(code) or ""
-        ts = time.strftime("%Y-%m-%dT%H:%M:%S")
-        self._event_bus.publish("news_feed", {
-            "stock_code": code, "stock_name": name,
-            "source": "cybos", "category": category_name,
-            "text": title, "timestamp": ts,
-        })
-
-        # Only process disclosure (공시) for trading
+        # Only process disclosure (공시), ignore general news entirely
         if category != CATEGORY_DISCLOSURE:
             return
 
-        log.info(f"CYBOS disclosure: [{code}] {name} - {title}")
+        name = self._code_manager.code_to_name(code) or ""
+        ts = time.strftime("%Y-%m-%dT%H:%M:%S")
+        log.info(f"CYBOS 공시: [{code}] {name} - {title}")
+
+        self._event_bus.publish("news_feed", {
+            "stock_code": code, "stock_name": name,
+            "source": "cybos", "category": "disclosure",
+            "text": title, "timestamp": ts,
+        })
 
         if code and name and "단일판매" in title:
-            log.info(f"CYBOS 단일판매 detected: [{code}] {name}")
+            log.info(f"CYBOS 단일판매 detected: [{code}] {name} -> 매수 시도")
             self._event_bus.publish("news_detected", {
                 "code": code, "name": name, "source": "cybos",
                 "title": title, "timestamp": ts,

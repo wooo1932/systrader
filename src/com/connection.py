@@ -25,4 +25,5 @@ class CybosConnection:
             time.sleep(0.2)
 
     def get_server_type(self) -> str:
-        return str(self._cybos.GetStockMarketKind("A005930"))
+        server = self._cybos.ServerType
+        return "simulated" if server == 1 else "real"

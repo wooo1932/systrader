@@ -1,10 +1,25 @@
 from __future__ import annotations
 import asyncio
 import logging
+import re
 import threading
 import time
 from telethon import TelegramClient, events
 from src.core.event_bus import EventBus
+
+_URL_PATTERN = re.compile(r"https?://\S+")
+_EMOJI_PATTERN = re.compile(
+    "["
+    "\U0001F300-\U0001F9FF"  # misc symbols, emoticons, etc.
+    "\U00002702-\U000027B0"  # dingbats
+    "\U0000FE00-\U0000FE0F"  # variation selectors
+    "\U0000200D"             # zero width joiner
+    "\U00002600-\U000026FF"  # misc symbols
+    "\U00002500-\U00002BEF"  # box drawing, misc symbols
+    "\U00010000-\U0010FFFF"  # supplementary
+    "]+", re.UNICODE
+)
+_SEPARATORS = re.compile(r"[\s()\[\]{}<>,.:;/\\|'\"` \u00b7\u2026!?#*@$%^&\-_+=~]+")
 
 log = logging.getLogger(__name__)
 
@@ -80,10 +95,18 @@ class TelegramNewsSource:
             })
 
     def _extract_stocks(self, text: str) -> list[tuple[str, str]]:
+        cleaned = _URL_PATTERN.sub("", text)
+        cleaned = _EMOJI_PATTERN.sub(" ", cleaned)
+        words = _SEPARATORS.split(cleaned)
+        name_to_code = {name: code for name, code in self._code_manager.all_stocks()}
         results = []
         seen = set()
-        for name, code in self._code_manager.all_stocks():
-            if len(name) >= 2 and name in text and code not in seen:
-                results.append((code, name))
+        for word in words:
+            word = word.strip()
+            if not word or len(word) < 2:
+                continue
+            code = name_to_code.get(word)
+            if code and code not in seen:
+                results.append((code, word))
                 seen.add(code)
         return results
