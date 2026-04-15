@@ -81,12 +81,15 @@ class TelegramNewsSource:
 
     def _on_message(self, text: str, channel_name: str) -> None:
         log.info(f"Telegram [{channel_name}]: {text[:80]}")
-        self._event_bus.publish("news_feed", {
-            "stock_code": "", "stock_name": "",
-            "source": "telegram", "category": channel_name,
-            "text": text, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        })
         matches = self._extract_stocks(text)
+        ts = time.strftime("%Y-%m-%dT%H:%M:%S")
+        stock_code = matches[0][0] if matches else ""
+        stock_name = matches[0][1] if matches else ""
+        self._event_bus.publish("news_feed", {
+            "stock_code": stock_code, "stock_name": stock_name,
+            "source": "telegram", "category": channel_name,
+            "text": text, "timestamp": ts,
+        })
         for code, name in matches:
             self._event_bus.publish("news_detected", {
                 "code": code, "name": name, "source": "telegram",
