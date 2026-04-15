@@ -12,7 +12,7 @@ sys.modules.setdefault("win32com.client", MagicMock())
 sys.modules.setdefault("telethon", MagicMock())
 sys.modules.setdefault("telethon.events", MagicMock())
 
-from src.news.cybos_news import CybosNewsSource, CybosNewsHandler
+from src.news.cybos_news import CybosNewsSource, CybosNewsHandler, CATEGORY_NEWS, CATEGORY_DISCLOSURE
 from src.news.telegram_news import TelegramNewsSource
 
 
@@ -29,58 +29,67 @@ def make_code_manager(stocks=None):
 # ---------- CybosNewsSource ----------
 
 class TestCybosNewsSource:
-    def test_on_news_publishes_news_feed(self):
+    def test_news_feed_receives_all_categories(self):
         bus = EventBus()
         cm = make_code_manager()
         source = CybosNewsSource(bus, cm)
         received = []
         bus.subscribe("news_feed", lambda d: received.append(d))
 
-        source._on_news("A005930", "삼성전자 실적 발표")
+        source._on_news("A005930", CATEGORY_NEWS, "삼성전자 일반 뉴스")
+        source._on_news("A005930", CATEGORY_DISCLOSURE, "삼성전자 공시")
 
-        assert len(received) == 1
-        assert received[0]["stock_code"] == "A005930"
-        assert received[0]["stock_name"] == "삼성전자"
-        assert received[0]["source"] == "cybos"
-        assert received[0]["text"] == "삼성전자 실적 발표"
+        assert len(received) == 2
+        assert received[0]["category"] == "news"
+        assert received[1]["category"] == "disclosure"
 
-    def test_on_news_publishes_news_detected_for_keyword(self):
+    def test_detected_only_for_disclosure_with_keyword(self):
         bus = EventBus()
         cm = make_code_manager()
         source = CybosNewsSource(bus, cm)
         detected = []
         bus.subscribe("news_detected", lambda d: detected.append(d))
 
-        source._on_news("A005930", "삼성전자 단일판매 공시")
+        source._on_news("A005930", CATEGORY_DISCLOSURE, "삼성전자 단일판매 공시")
 
         assert len(detected) == 1
         assert detected[0]["code"] == "A005930"
         assert detected[0]["name"] == "삼성전자"
-        assert detected[0]["source"] == "cybos"
 
-    def test_on_news_no_detected_without_keyword(self):
+    def test_no_detected_for_disclosure_without_keyword(self):
         bus = EventBus()
         cm = make_code_manager()
         source = CybosNewsSource(bus, cm)
         detected = []
         bus.subscribe("news_detected", lambda d: detected.append(d))
 
-        source._on_news("A005930", "삼성전자 실적 발표")
+        source._on_news("A005930", CATEGORY_DISCLOSURE, "삼성전자 유상증자")
 
         assert len(detected) == 0
 
-    def test_on_news_no_detected_when_code_empty(self):
+    def test_no_detected_for_news_category(self):
         bus = EventBus()
         cm = make_code_manager()
         source = CybosNewsSource(bus, cm)
         detected = []
         bus.subscribe("news_detected", lambda d: detected.append(d))
 
-        source._on_news("", "시장 전체 뉴스")
+        source._on_news("A005930", CATEGORY_NEWS, "삼성전자 단일판매 뉴스")
 
         assert len(detected) == 0
 
-    def test_on_news_no_detected_when_name_not_found(self):
+    def test_no_detected_when_code_empty(self):
+        bus = EventBus()
+        cm = make_code_manager()
+        source = CybosNewsSource(bus, cm)
+        detected = []
+        bus.subscribe("news_detected", lambda d: detected.append(d))
+
+        source._on_news("", CATEGORY_DISCLOSURE, "단일판매 공시")
+
+        assert len(detected) == 0
+
+    def test_no_detected_when_name_not_found(self):
         bus = EventBus()
         cm = MagicMock()
         cm.code_to_name = lambda c: ""
@@ -88,7 +97,7 @@ class TestCybosNewsSource:
         detected = []
         bus.subscribe("news_detected", lambda d: detected.append(d))
 
-        source._on_news("A999999", "알 수 없는 종목")
+        source._on_news("A999999", CATEGORY_DISCLOSURE, "단일판매 알 수 없는 종목")
 
         assert len(detected) == 0
 
@@ -99,7 +108,7 @@ class TestCybosNewsSource:
         received = []
         bus.subscribe("news_feed", lambda d: received.append(d))
 
-        source._on_news("A005930", "test")
+        source._on_news("A005930", CATEGORY_NEWS, "test")
 
         ts = received[0]["timestamp"]
         assert len(ts) == 19  # YYYY-MM-DDTHH:MM:SS
