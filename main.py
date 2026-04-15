@@ -143,6 +143,32 @@ def main():
         telegram_news.set_channels([c["channel_url"] for c in channels if c["enabled"]])
         telegram_news.start()
 
+    # 9b. Telegram 2FA code dialog
+    if telegram_news:
+        import threading
+        import tkinter as tk
+        from tkinter import simpledialog
+
+        def _show_code_dialog(data):
+            if not data.get("pending"):
+                return
+            def _ask():
+                root = tk.Tk()
+                root.withdraw()
+                root.attributes('-topmost', True)
+                code = simpledialog.askstring(
+                    "Telegram 인증",
+                    "텔레그램 인증 코드를 입력하세요:",
+                    parent=root,
+                )
+                root.destroy()
+                if code and telegram_news:
+                    telegram_news.submit_auth_code(code.strip())
+                    log.info("Telegram auth code submitted")
+            threading.Thread(target=_ask, daemon=True).start()
+
+        event_bus.subscribe("telegram_code_pending", _show_code_dialog)
+
     # 10. Telegram alert bot
     alert_bot = None
     if settings.telegram_bot.token:
