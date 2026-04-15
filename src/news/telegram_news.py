@@ -101,6 +101,7 @@ class TelegramNewsSource:
         name_to_code = {name: code for name, code in self._code_manager.all_stocks()}
         results = []
         seen = set()
+        # 1. Token-based exact match (preferred, no false positives)
         for word in words:
             word = word.strip()
             if not word or len(word) < 2:
@@ -109,4 +110,10 @@ class TelegramNewsSource:
             if code and code not in seen:
                 results.append((code, word))
                 seen.add(code)
+        # 2. Substring fallback for names >= 3 chars (catches "사이냅소프트가" etc.)
+        if not results:
+            for name, code in name_to_code.items():
+                if len(name) >= 3 and name in cleaned and code not in seen:
+                    results.append((code, name))
+                    seen.add(code)
         return results
