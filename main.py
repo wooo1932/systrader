@@ -13,7 +13,25 @@ import time
 log = logging.getLogger("systrader")
 
 
+def _disable_quick_edit():
+    """Disable Quick Edit Mode to prevent console click from pausing the process."""
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetStdHandle(-10)  # STD_INPUT_HANDLE
+        mode = ctypes.c_ulong()
+        kernel32.GetConsoleMode(handle, ctypes.byref(mode))
+        ENABLE_QUICK_EDIT = 0x0040
+        ENABLE_EXTENDED_FLAGS = 0x0080
+        mode.value = (mode.value & ~ENABLE_QUICK_EDIT) | ENABLE_EXTENDED_FLAGS
+        kernel32.SetConsoleMode(handle, mode.value)
+    except Exception:
+        pass
+
+
 def main():
+    _disable_quick_edit()
+
     import pythoncom
     import win32event
 
