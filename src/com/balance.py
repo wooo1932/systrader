@@ -29,9 +29,9 @@ class CybosBalance:
         holdings = []
         for i in range(count):
             holdings.append({
-                "code": obj.GetDataValue(0, i),
-                "name": obj.GetDataValue(1, i),
-                "price": obj.GetDataValue(7, i),
-                "quantity": obj.GetDataValue(9, i),
+                "code": obj.GetDataValue(12, i),
+                "name": obj.GetDataValue(0, i),
+                "price": obj.GetDataValue(17, i),
+                "quantity": obj.GetDataValue(7, i),
             })
         return holdings

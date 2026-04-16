@@ -20,16 +20,21 @@ class StockMst:
         if ret != 0:
             log.error(f"StockMst BlockRequest failed: {ret}")
             return None
+        current_price = obj.GetHeaderValue(11)
+        prev_close = obj.GetHeaderValue(10)
+        listed_shares = obj.GetHeaderValue(31)
+        change_pct = (current_price - prev_close) / prev_close * 100 if prev_close else 0
+        market_cap = current_price * listed_shares
         return {
             "code": code,
             "name": obj.GetHeaderValue(1),
-            "current_price": obj.GetHeaderValue(11),
+            "current_price": current_price,
             "diff": obj.GetHeaderValue(12),
-            "change_pct": obj.GetHeaderValue(13),
+            "change_pct": round(change_pct, 2),
             "volume": obj.GetHeaderValue(18),
-            "market_cap": obj.GetHeaderValue(23),
-            "upper_limit_price": obj.GetHeaderValue(5),
-            "lower_limit_price": obj.GetHeaderValue(6),
+            "market_cap": market_cap,
+            "upper_limit_price": obj.GetHeaderValue(8),
+            "lower_limit_price": obj.GetHeaderValue(9),
         }
 
 
@@ -37,17 +42,20 @@ class StockCurHandler:
     callbacks: dict[str, callable] = {}
 
     def OnReceived(self):
-        code = self._obj.GetHeaderValue(0)
-        data = {
-            "code": code,
-            "price": self._obj.GetHeaderValue(13),
-            "volume": self._obj.GetHeaderValue(17),
-            "bid_or_ask": "buy" if self._obj.GetHeaderValue(14) == ord("2") else "sell",
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.") + f"{time.time() % 1:.3f}"[2:],
-        }
-        cb = StockCurHandler.callbacks.get(code)
-        if cb:
-            cb(code, data)
+        try:
+            code = self.GetHeaderValue(0)
+            data = {
+                "code": code,
+                "price": self.GetHeaderValue(13),
+                "volume": self.GetHeaderValue(17),
+                "bid_or_ask": "sell" if self.GetHeaderValue(14) == ord("2") else "buy",
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.") + f"{time.time() % 1:.3f}"[2:],
+            }
+            cb = StockCurHandler.callbacks.get(code)
+            if cb:
+                cb(code, data)
+        except Exception as e:
+            log.error(f"StockCurHandler error: {e}")
 
 
 class StockCurManager:
@@ -85,7 +93,7 @@ class MarketEye:
         if not codes:
             return []
         if fields is None:
-            fields = [0, 4, 5, 6, 11, 12, 13, 18, 20]
+            fields = [0, 4, 5, 6, 10, 11, 12, 13, 20]
         self._conn.wait_if_limited(0)
         obj = win32com.client.Dispatch("CpSysDib.MarketEye")
         obj.SetInputValue(0, fields)

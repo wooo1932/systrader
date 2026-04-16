@@ -13,7 +13,7 @@ log = logging.getLogger(__name__)
 PARAM_DEFAULTS = {
     "max_holdings": "3",
     "min_market_cap": "50000000000",
-    "max_market_cap": "1000000000000",
+    "max_market_cap": "50000000000000",
     "min_change_pct": "5.0",
     "max_change_pct": "28.0",
     "entry_up_ticks": "3",
@@ -128,7 +128,8 @@ class TradingEngine:
         )
 
         if not result.passed:
-            log.info(f"[ENGINE] Screener rejected {code} ({name}): {result.reason}")
+            log.info(f"[ENGINE] Screener rejected {code} ({name}): {result.reason} "
+                     f"(change_pct={info['change_pct']}, market_cap={info['market_cap']}, price={info['current_price']})")
             return
 
         log.info(f"[ENGINE] Screener passed {code} ({name}), creating worker...")

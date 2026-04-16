@@ -57,6 +57,7 @@ class CybosOrder:
     def cancel(self, order_num: int, code: str, qty: int) -> dict:
         self._conn.wait_if_limited(1)
         obj = win32com.client.Dispatch("CpTrade.CpTd0314")
+        obj.SetInputValue(0, "1")
         obj.SetInputValue(1, order_num)
         obj.SetInputValue(2, self._account)
         obj.SetInputValue(3, self._goods_code)
