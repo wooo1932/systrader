@@ -104,16 +104,17 @@ class StockWorker:
             self._place_buy_order(price)
 
     def _place_buy_order(self, current_price: float) -> None:
-        tick_unit = get_tick_unit(current_price)
-        order_price = int(current_price + tick_unit * self.params["buy_tick_offset"])
-        qty = self.params["bet_amount"] // order_price
+        order_price = int(self.params.get("upper_limit_price", current_price))
+        if order_price <= 0:
+            order_price = current_price
+        qty = self.params["bet_amount"] // current_price
         if qty <= 0:
-            log.warning(f"[{self.stock_code}] Buy cancelled: qty=0 (bet={self.params['bet_amount']}, price={order_price})")
+            log.warning(f"[{self.stock_code}] Buy cancelled: qty=0 (bet={self.params['bet_amount']}, price={current_price})")
             self._set_state(WorkerState.CANCELLED)
             return
         self.buy_order_price = order_price
-        log.info(f"[{self.stock_code}] Placing buy order: {qty}@{order_price} "
-                 f"(current={current_price}, tick_unit={tick_unit}, bet={self.params['bet_amount']})")
+        log.info(f"[{self.stock_code}] Placing buy order: {qty}@{order_price}(upper_limit) "
+                 f"(current={current_price}, bet={self.params['bet_amount']})")
         self._set_state(WorkerState.BUYING)
         self._on_order("BUY", self.stock_code, qty, order_price)
 

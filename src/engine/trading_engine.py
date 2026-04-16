@@ -132,6 +132,7 @@ class TradingEngine:
                      f"(change_pct={info['change_pct']}, market_cap={info['market_cap']}, price={info['current_price']})")
             return
 
+        params["upper_limit_price"] = info["upper_limit_price"]
         log.info(f"[ENGINE] Screener passed {code} ({name}), creating worker...")
         trade_id = self.db.trades.create(
             stock_code=code, stock_name=name,
