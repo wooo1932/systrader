@@ -171,8 +171,10 @@ class TradingEngine:
         worker.on_tick(tick_data)
 
     def on_fill(self, code: str, side: str, price: float, quantity: int) -> None:
+        log.info(f"[ENGINE] Fill received: {side} {code} {quantity}@{price}")
         worker = self.workers.get(code)
         if not worker:
+            log.warning(f"[ENGINE] Fill for unknown worker: {code}")
             return
         if worker.trade_id:
             self.db.executions.insert(

@@ -77,7 +77,10 @@ class StockWorker:
         self._last_price = price
 
     def _handle_screening(self, tick: dict, price: float) -> None:
-        if time.time() - self._screen_start > self.params["entry_timeout_sec"]:
+        elapsed = time.time() - self._screen_start
+        if elapsed > self.params["entry_timeout_sec"]:
+            log.info(f"[{self.stock_code}] Screening timeout after {elapsed:.1f}s, "
+                     f"ticks={len(self._ticks)}, consecutive_up={self._consecutive_up}")
             self._set_state(WorkerState.CANCELLED)
             return
 
@@ -89,8 +92,15 @@ class StockWorker:
         buy_count = sum(1 for t in self._ticks if t["bid_or_ask"] == "buy")
         buy_ratio = buy_count / len(self._ticks) if self._ticks else 0
 
+        if len(self._ticks) % 20 == 0:
+            log.info(f"[{self.stock_code}] Screening: price={price}, ticks={len(self._ticks)}, "
+                     f"up={self._consecutive_up}/{self.params['entry_up_ticks']}, "
+                     f"buy_ratio={buy_ratio:.2f}/{self.params['entry_buy_ratio']}")
+
         if (self._consecutive_up >= self.params["entry_up_ticks"]
                 and buy_ratio >= self.params["entry_buy_ratio"]):
+            log.info(f"[{self.stock_code}] Entry signal! up={self._consecutive_up}, "
+                     f"buy_ratio={buy_ratio:.2f}, price={price}")
             self._place_buy_order(price)
 
     def _place_buy_order(self, current_price: float) -> None:
@@ -98,20 +108,27 @@ class StockWorker:
         order_price = int(current_price + tick_unit * self.params["buy_tick_offset"])
         qty = self.params["bet_amount"] // order_price
         if qty <= 0:
+            log.warning(f"[{self.stock_code}] Buy cancelled: qty=0 (bet={self.params['bet_amount']}, price={order_price})")
             self._set_state(WorkerState.CANCELLED)
             return
         self.buy_order_price = order_price
+        log.info(f"[{self.stock_code}] Placing buy order: {qty}@{order_price} "
+                 f"(current={current_price}, tick_unit={tick_unit}, bet={self.params['bet_amount']})")
         self._set_state(WorkerState.BUYING)
         self._on_order("BUY", self.stock_code, qty, order_price)
 
     def _handle_holding(self, tick: dict, price: float) -> None:
+        prev_highest = self.highest_price
         self.highest_price = max(self.highest_price, price)
 
         vi_detected = (time.time() - self._last_tick_time) > self.params["vi_detect_sec"]
         if vi_detected:
+            pause_dur = time.time() - self._last_tick_time
             self.bpi.reset()
-            self._hold_paused += time.time() - self._last_tick_time
+            self._hold_paused += pause_dur
             pnl_pct = (price - self.buy_price) / self.buy_price
+            log.info(f"[{self.stock_code}] VI detected: pause={pause_dur:.1f}s, "
+                     f"price={price}, pnl={pnl_pct:+.2%}")
             if pnl_pct <= self.params["stoploss_pct"]:
                 self._place_sell_order(price, "stoploss")
             return
@@ -122,17 +139,34 @@ class StockWorker:
         pnl_pct = (price - self.buy_price) / self.buy_price
         drop_pct = (price - self.highest_price) / self.highest_price if self.highest_price > 0 else 0
         hold_time = time.time() - self._hold_start - self._hold_paused
+        bpi_short = self.bpi.short if self.bpi else 0
+
+        if len(self._ticks) % 50 == 0:
+            log.info(f"[{self.stock_code}] Holding: price={price}, pnl={pnl_pct:+.2%}, "
+                     f"high={self.highest_price}, drop={drop_pct:+.2%}, "
+                     f"bpi={bpi_short:.2f}, hold={hold_time:.0f}s")
+
+        if price > prev_highest:
+            log.info(f"[{self.stock_code}] New high: {price} (pnl={pnl_pct:+.2%})")
 
         if pnl_pct <= self.params["stoploss_pct"]:
+            log.info(f"[{self.stock_code}] Stoploss triggered: pnl={pnl_pct:+.2%}")
             self._place_sell_order(price, "stoploss")
         elif drop_pct <= self.params["maxdrop_pct"]:
+            log.info(f"[{self.stock_code}] Maxdrop triggered: drop={drop_pct:+.2%} from high={self.highest_price}")
             self._place_sell_order(price, "maxdrop")
         elif self.bpi.is_sell_signal(self.params["bpi_sell_threshold"]):
+            log.info(f"[{self.stock_code}] BPI sell signal: bpi_short={self.bpi.short:.2f}, bpi_long={self.bpi.long:.2f}")
             self._place_sell_order(price, "bpi_reversal")
         elif hold_time >= self.params["max_hold_sec"]:
+            log.info(f"[{self.stock_code}] Hold timeout: {hold_time:.0f}s >= {self.params['max_hold_sec']}s")
             self._place_sell_order(price, "timeout")
 
     def _place_sell_order(self, price: float, reason: str) -> None:
+        pnl_pct = (price - self.buy_price) / self.buy_price if self.buy_price else 0
+        hold_time = time.time() - self._hold_start - self._hold_paused
+        log.info(f"[{self.stock_code}] Placing sell order: reason={reason}, qty={self.buy_qty}, "
+                 f"price={price}, buy_price={self.buy_price}, pnl={pnl_pct:+.2%}, hold={hold_time:.0f}s")
         self.sell_reason = reason
         self._set_state(WorkerState.SELLING)
         self._on_order("SELL_MARKET", self.stock_code, self.buy_qty, 0)
@@ -146,6 +180,8 @@ class StockWorker:
             self._hold_paused = 0
             self._last_tick_time = time.time()
             self._init_bpi()
+            log.info(f"[{self.stock_code}] Buy filled: {quantity}@{price} "
+                     f"(ordered@{self.buy_order_price}, total={price * quantity:,.0f}원)")
             self._set_state(WorkerState.HOLDING)
         elif side == "SELL" and self.state == WorkerState.SELLING:
             self.sell_price = price
@@ -153,6 +189,9 @@ class StockWorker:
             self.hold_seconds = time.time() - self._hold_start - self._hold_paused
             self.pnl_pct = (self.sell_price - self.buy_price) / self.buy_price
             self.pnl_amount = (self.sell_price - self.buy_price) * self.sell_qty
+            log.info(f"[{self.stock_code}] Sell filled: {quantity}@{price}, "
+                     f"pnl={self.pnl_pct:+.2%} ({self.pnl_amount:+,.0f}원), "
+                     f"hold={self.hold_seconds:.0f}s, reason={self.sell_reason}")
             self._set_state(WorkerState.DONE)
 
     def cancel(self, reason: str = "") -> None:
