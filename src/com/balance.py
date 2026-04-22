@@ -13,25 +13,61 @@ class CybosBalance:
         self._goods_code = goods_code
 
     def get_holdings(self) -> list[dict]:
-        self._conn.wait_if_limited(1)
-        obj = win32com.client.Dispatch("CpTrade.CpTd6033")
-        obj.SetInputValue(0, self._account)
-        obj.SetInputValue(1, self._goods_code)
-        obj.SetInputValue(2, 50)
-        ret = obj.BlockRequest()
+        """Return broker holdings from CpTd6033. Uses CYBOS-provided fields directly
+        (no local computation) for accuracy:
+          - avg_price (int, field 4): 매수평단가
+          - quantity  (int, field 7): 체결잔고수량
+          - eval_amount (field 9): 평가금액
+          - pnl_amount  (field 10): 평가손익
+          - pnl_pct     (field 11): 손익률 (%)
+        Retries once on ret=4 (trade API rate limit) after a short wait.
+        """
+        import time as _t
+        obj = None
+        ret = -1
+        for attempt in range(3):
+            self._conn.wait_if_limited(1)
+            obj = win32com.client.Dispatch("CpTrade.CpTd6033")
+            obj.SetInputValue(0, self._account)
+            obj.SetInputValue(1, self._goods_code)
+            obj.SetInputValue(2, 50)
+            ret = obj.BlockRequest()
+            if ret == 0:
+                break
+            if ret == 4:
+                # Rate limit — back off briefly and retry
+                log.debug(f"CpTd6033 rate-limited (ret=4), attempt {attempt+1}/3, backing off")
+                _t.sleep(0.3 * (attempt + 1))
+                continue
+            if ret == 1:
+                # Transient communication error — retry with backoff
+                log.debug(f"CpTd6033 comm error (ret=1), attempt {attempt+1}/3, backing off")
+                _t.sleep(0.3 * (attempt + 1))
+                continue
+            # Other errors: give up
+            log.warning(f"CpTd6033 BlockRequest failed: ret={ret}")
+            return []
         if ret != 0:
-            log.error(f"CpTd6033 BlockRequest failed: ret={ret}")
+            log.warning(f"CpTd6033 rate-limited after 3 attempts; skipping this cycle")
             return []
         if obj.GetDibStatus() != 0:
-            log.error(f"CpTd6033 error: {obj.GetDibMsg1()}")
+            log.warning(f"CpTd6033 error: {obj.GetDibMsg1()}")
             return []
         count = obj.GetHeaderValue(7)
         holdings = []
         for i in range(count):
-            holdings.append({
-                "code": obj.GetDataValue(12, i),
-                "name": obj.GetDataValue(0, i),
-                "price": obj.GetDataValue(17, i),
-                "quantity": obj.GetDataValue(7, i),
-            })
+            try:
+                holdings.append({
+                    "code": obj.GetDataValue(12, i),
+                    "name": obj.GetDataValue(0, i),
+                    "quantity": int(obj.GetDataValue(7, i) or 0),
+                    "avg_price": int(obj.GetDataValue(4, i) or 0),
+                    "eval_amount": int(obj.GetDataValue(9, i) or 0),
+                    "pnl_amount": int(obj.GetDataValue(10, i) or 0),
+                    "pnl_pct": float(obj.GetDataValue(11, i) or 0),
+                    # Keep legacy 'price' key for back-compat (= avg_price)
+                    "price": int(obj.GetDataValue(4, i) or 0),
+                })
+            except Exception as e:
+                log.warning(f"CpTd6033 row {i} parse error: {e}")
         return holdings
