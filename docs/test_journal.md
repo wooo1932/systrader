@@ -139,6 +139,39 @@
 - 다른 파라미터 모두 유지.
 - (참고) 처음엔 `0.02`로 활성화만 늦추는 안을 검토했으나, baseline과의 직접 비교가 더 명확한 신호를 준다고 판단해 OFF 선택.
 
+### Day 4 결과 & 환경 이슈
+
+- 완료 3건 **전부 loss**: 어보브반도체 -111K, 한국비엔씨 -42K, 오가노이드 -34K. **Total -188K**.
+- 모두 BPI 또는 timeout 매도. Trailing OFF baseline 데이터로는 표본 부족.
+- 환경 장애 지배적: CYBOS COM 하드 크래시 **5회** (4회 BUY BlockRequest + 1회 저녁 공시 flood의 PumpWaitingMessages). CYBOS Plus 완전 재시작 후 정상 복귀. 재로그인만으론 해결 안 됨 → CYBOS 내부 COM state 문제로 추정.
+- 안정화 수정 (9 files, commit `ded69e2`): CommandQueue 위임, BUYING timeout, 장외 뉴스 필터(08:30-16:00), external supervisor, balance retry 통합, connection throttled redispatch.
+
+### Day 5 (4/24) 변경 — 전체 기간 37건 분석 기반
+
+**분석 결과 (누적 37건, 4/17~4/23)**:
+
+| entry_condition | n | 승률 | avg_pnl | total |
+|---|---|---|---|---|
+| price_breakout | 21 | 52.4% | +0.49% | **+1,000K** |
+| volume_spike | 4 | 50.0% | -0.00% | -0.5K |
+| **momentum** | **9** | **33.3%** | **-0.18%** | **-316K** |
+
+| sell_reason | n | 승률 | avg_pnl | missed_max |
+|---|---|---|---|---|
+| bpi_reversal | 24 | 54.2% | +0.54% | +2.15% |
+| trailing_stop | 7 | 42.9% | -0.17% | +3.40% |
+| overnight_liquidate | 3 | 0% | -2.03% | +4.48% |
+
+| news_source | n | 승률 | avg_pnl | total |
+|---|---|---|---|---|
+| cybos (단일판매) | 8 | **62.5%** | +0.60% | +437K |
+| telegram | 28 | 42.9% | +0.14% | +237K |
+
+**변경 1건만 격리**:
+- **`momentum` 진입 조건 제거** (`worker.py`). price_breakout과 volume_spike는 모두 `gain > 0` 을 요구하지만 momentum은 price-agnostic이어서 하락 중인 종목(예: 아이씨디 gain=-1.78%)에도 진입. 9건 중 승률 33%, 누적 -316K로 명백한 손실 기여자.
+- trailing OFF는 유지 (데이터 추가 수집 필요).
+- 향후 (Day 6+) 검토: 텔레그램 소스 필터 강화 (승률 42.9%), min_hold_sec 조정.
+
 ### Day 2 추가 거래
 
 | Trade | 종목 | 진입조건 | 매수가 | 매도가 | 수량 | 손익 | 비고 |
