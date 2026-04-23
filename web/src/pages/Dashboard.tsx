@@ -9,6 +9,7 @@ import {
   fetchLiveLogs,
   submitTelegramCode,
   fetchNewsFeed,
+  emergencySellAll,
 } from "../api/client";
 import type { WsMessage, SystemStatus, LogEntry, NewsFeedItem } from "../api/client";
 
@@ -183,6 +184,16 @@ export default function Dashboard() {
   };
   const handleStop = () => stopEngine().then(() => fetchStatus().then(setStatus));
   const handleLaunch = () => launchCybos();
+  const handleEmergencySell = () => {
+    const n = holdings.length;
+    if (!window.confirm(
+      `긴급 전량 매도: 보유 ${n}종목 시장가 즉시 청산 + 엔진 정지합니다.\n계속하시겠습니까?`
+    )) return;
+    emergencySellAll().then((r) => {
+      alert(`긴급 매도 발동: ${r.count ?? 0}건 매도 주문 제출`);
+      fetchStatus().then(setStatus);
+    }).catch((e) => alert(`실패: ${e}`));
+  };
 
   const filteredLogs = logFilter === "ALL" ? logs : logs.filter((l) => l.level === logFilter);
   const wins = todayTrades.filter((t) => (t.pnl_amount ?? 0) > 0).length;
@@ -305,6 +316,15 @@ export default function Dashboard() {
           </button>
           <button className="btn btn-danger btn-sm" onClick={handleStop} disabled={!status.engine_running}>
             자동매매 중지
+          </button>
+          <button
+            className="btn btn-danger btn-sm"
+            onClick={handleEmergencySell}
+            disabled={holdings.length === 0}
+            title="보유 전량 시장가 매도 + 엔진 정지"
+            style={{ background: "#7f1d1d", fontWeight: 700 }}
+          >
+            🚨 긴급 전량매도
           </button>
         </div>
       </div>

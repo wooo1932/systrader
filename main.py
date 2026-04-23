@@ -326,6 +326,26 @@ def main():
             elif order_type != "BUY":
                 log.warning(f"[ENGINE] SELL failure — worker stays in SELLING, will retry via polling")
             return {"status": "error", "message": str(last_err)}
+        elif cmd == "emergency_sell_all":
+            # Stop engine first so no new buys enter while we liquidate
+            try:
+                engine.stop()
+            except Exception as e:
+                log.warning(f"[EMERGENCY] engine.stop failed: {e}")
+            from src.engine.worker import WorkerState
+            holding = [w for w in engine.workers.values()
+                       if w.state == WorkerState.HOLDING]
+            log.critical(f"[EMERGENCY] Sell-all triggered: {len(holding)} holdings to liquidate")
+            sold = 0
+            for w in holding:
+                try:
+                    price = w._last_price or w.buy_price or 0
+                    w._place_sell_order(price, "emergency_sell_all")
+                    sold += 1
+                except Exception as e:
+                    log.error(f"[EMERGENCY] Sell failed for {w.stock_code}: {e}")
+            event_bus.publish("emergency_sell_all", {"count": sold})
+            return {"status": "ok", "count": sold}
         elif cmd == "fetch_chart":
             code = params.get("code", "")
             interval = params.get("interval", "m")

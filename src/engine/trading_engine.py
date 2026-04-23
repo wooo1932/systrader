@@ -36,6 +36,7 @@ PARAM_DEFAULTS = {
     "buy_cutoff_hhmm": "1515",  # no new buys after this time (15 min buffer before 15:30 close)
     "market_open_hhmm": "0900",   # trading hours start (KOSPI/KOSDAQ)
     "market_close_hhmm": "1530",  # trading hours end
+    "daily_loss_limit": "0",  # abs KRW; realized-pnl-today <= -limit → engine.stop(). 0 disables.
 }
 
 
@@ -406,8 +407,41 @@ class TradingEngine:
                 result[key] = val
         return result
 
+    def _realized_pnl_today(self) -> int:
+        """Sum of today's completed-trade pnl_amount. Used for daily loss kill-switch."""
+        date_str = time.strftime("%Y-%m-%d")
+        try:
+            rows = self.db.fetch_all(
+                "SELECT COALESCE(SUM(pnl_amount), 0) AS pnl FROM trades "
+                "WHERE status='done' AND date(sell_time)=? AND pnl_amount IS NOT NULL",
+                (date_str,),
+            )
+            return int(rows[0]["pnl"]) if rows else 0
+        except Exception as e:
+            log.warning(f"[ENGINE] realized_pnl_today query failed: {e}")
+            return 0
+
+    def _check_daily_loss_limit(self) -> bool:
+        """Stop engine if today's realized loss breached abs limit. Returns True if tripped."""
+        try:
+            limit = int(self.get_param("daily_loss_limit") or 0)
+        except (TypeError, ValueError):
+            return False
+        if limit <= 0:
+            return False  # disabled
+        pnl = self._realized_pnl_today()
+        if pnl <= -limit:
+            log.critical(f"[ENGINE] DAILY LOSS LIMIT BREACHED: realized={pnl:+,}원 "
+                         f"<= -{limit:,}원. Stopping engine (existing holdings unaffected).")
+            self.event_bus.publish("daily_loss_kill_switch", {"pnl": pnl, "limit": limit})
+            self.stop()
+            return True
+        return False
+
     def on_news(self, news_data: dict) -> None:
         if not self.running:
+            return
+        if self._check_daily_loss_limit():
             return
         code = news_data.get("code", "")
         name = news_data.get("name", "")
