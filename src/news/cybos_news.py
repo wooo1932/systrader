@@ -26,6 +26,13 @@ class CybosNewsHandler:
 
 
 class CybosNewsSource:
+    # Accept CYBOS disclosure events roughly around market hours only. Off-hours
+    # (esp. ~20:00 batch disclosures) previously triggered a COM message-pump
+    # crash under load — we simply ignore those events before engine processing.
+    # Widened on both sides so pre-open news and closing-auction notices still land.
+    ACCEPT_OPEN_HHMM = "0830"
+    ACCEPT_CLOSE_HHMM = "1600"
+
     def __init__(self, event_bus: EventBus, code_manager):
         self._event_bus = event_bus
         self._code_manager = code_manager
@@ -45,8 +52,17 @@ class CybosNewsSource:
             log.info("CYBOS news unsubscribed")
 
     def _on_news(self, code: str, category: int, title: str) -> None:
+        # Off-hours gate: skip the off-market batch disclosure flood (see class docstring).
+        now_hhmm = time.strftime("%H%M")
+        if not (self.ACCEPT_OPEN_HHMM <= now_hhmm <= self.ACCEPT_CLOSE_HHMM):
+            return
+
         # Only process disclosure (공시), ignore general news entirely
         if category != CATEGORY_DISCLOSURE:
+            return
+
+        # Filter: only 주권 (common stock). Exclude ETN, ETF, REIT, ELW, 외국주, etc.
+        if not self._code_manager.is_tradeable_stock(code):
             return
 
         name = self._code_manager.code_to_name(code) or ""

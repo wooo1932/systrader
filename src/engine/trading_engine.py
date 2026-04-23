@@ -507,32 +507,12 @@ class TradingEngine:
         worker.on_fill(side, price_int, quantity)
 
     def _handle_order(self, order_type: str, code: str, qty: int, price: int) -> None:
-        log.info(f"[ENGINE] Placing order: {order_type} {code} {qty}@{price}")
-        # Retry with backoff. Sell failures MUST NOT leave a HOLDING position orphaned,
-        # so we retry up to 3 times. Buy failures fall through to cancel (safe default).
-        attempts = 3 if order_type.startswith("SELL") else 1
-        last_err = None
-        for i in range(attempts):
-            try:
-                self._order_func(order_type, code, qty, price)
-                log.info(f"[ENGINE] Order submitted: {order_type} {code} {qty}@{price}")
-                return
-            except Exception as e:
-                last_err = e
-                log.warning(f"[ENGINE] Order attempt {i+1}/{attempts} failed for {code}: {e}")
-                if i + 1 < attempts:
-                    time.sleep(0.5 * (i + 1))  # 0.5s, 1.0s backoff
-        log.error(f"[ENGINE] Order FAILED after {attempts} attempts for {code}: {last_err}")
-        worker = self.workers.get(code)
-        if not worker:
-            return
-        if order_type == "BUY":
-            # BUY failure → cancel screening/buying worker (no position was opened)
-            worker.cancel(f"buy_error: {last_err}")
-        else:
-            # SELL failure → keep worker in SELLING, let check_pending_fills re-issue.
-            # Also arm the selling_timeout_sec backstop.
-            log.warning(f"[ENGINE] SELL failure — worker stays in SELLING, will retry via polling")
+        # Enqueue only — _order_func defers the real COM call to the main loop's
+        # CommandQueue (`place_order` handler in main.py), which owns retry +
+        # worker.cancel on failure. Calling COM here would re-enter from a tick
+        # event and crash the process.
+        log.info(f"[ENGINE] Queuing order: {order_type} {code} {qty}@{price}")
+        self._order_func(order_type, code, qty, price)
 
     def _handle_state_change(self, worker: StockWorker,
                               old: WorkerState, new: WorkerState) -> None:
@@ -687,6 +667,22 @@ class TradingEngine:
                 if w.state == WorkerState.SCREENING:
                     # Screening timeout can run anytime (cancels stale pre-market screens).
                     w.check_screening_timeout()
+                elif w.state == WorkerState.BUYING:
+                    # BUYING timeout: cancel zombie buying workers (no broker fill).
+                    # Happens when (a) BUY order crashed before COM submit, or
+                    # (b) limit price unreachable. Without this, max_holdings is
+                    # blocked indefinitely and new news entries get rejected.
+                    if not getattr(w, "_buying_started_at", None):
+                        w._buying_started_at = time.time()
+                    elif time.time() - w._buying_started_at >= 60.0:
+                        log.warning(f"[{w.stock_code}] BUYING timeout: no fill after 60s, cancelling")
+                        if w.buy_order_num and self._cancel_func:
+                            try:
+                                self._cancel_func(w.buy_order_num, w.stock_code,
+                                                  w.buy_order_qty or 0)
+                            except Exception as e:
+                                log.warning(f"[{w.stock_code}] Cancel call failed: {e}")
+                        w.cancel("buy_timeout")
                 elif w.state == WorkerState.HOLDING:
                     if not in_market:
                         continue  # Defer sell decisions until market opens

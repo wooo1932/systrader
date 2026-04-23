@@ -135,9 +135,9 @@
 
 ### Day 4 (4/23) 테스트 변수 (1개만 격리)
 
-- **`trailing_activate_pct: 0.01 → 0.02`**: trailing 활성화를 +1%→+2%로 늦춰 60s 직후 즉시 트리거 패턴 완화. 더 큰 익절 노림.
-- 다른 파라미터 (trailing_stop_pct, min_hold_sec, momentum gain 가드) 모두 유지 → 이 한 변수 효과 측정.
-- 2~3일 후 momentum gain 가드 적용 검토.
+- **`trailing_activate_pct: 0.01 → 1.0` (사실상 OFF)**: 급등주 스캘핑에 trailing이 안 맞을 수 있다는 가설 검증. Day 3 데이터에서 trailing -0.17% / BPI +0.24%로 BPI가 우월. trailing 적용 전 baseline (BPI 반전 + stoploss -5% + max_hold 300s) 으로 회귀해 승률 측정.
+- 다른 파라미터 모두 유지.
+- (참고) 처음엔 `0.02`로 활성화만 늦추는 안을 검토했으나, baseline과의 직접 비교가 더 명확한 신호를 준다고 판단해 OFF 선택.
 
 ### Day 2 추가 거래
 

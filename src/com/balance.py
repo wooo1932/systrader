@@ -20,7 +20,7 @@ class CybosBalance:
           - eval_amount (field 9): 평가금액
           - pnl_amount  (field 10): 평가손익
           - pnl_pct     (field 11): 손익률 (%)
-        Retries once on ret=4 (trade API rate limit) after a short wait.
+        Retries up to 3x on transient errors (ret=1 comm drop, ret=4 rate limit).
         """
         import time as _t
         obj = None
@@ -34,21 +34,17 @@ class CybosBalance:
             ret = obj.BlockRequest()
             if ret == 0:
                 break
-            if ret == 4:
-                # Rate limit — back off briefly and retry
-                log.debug(f"CpTd6033 rate-limited (ret=4), attempt {attempt+1}/3, backing off")
+            # Transient errors worth retrying:
+            #   ret=1 → comm connection dropped briefly
+            #   ret=4 → trade API rate limit (20 req/s)
+            if ret in (1, 4):
+                log.debug(f"CpTd6033 transient ret={ret}, attempt {attempt+1}/3, backing off")
                 _t.sleep(0.3 * (attempt + 1))
                 continue
-            if ret == 1:
-                # Transient communication error — retry with backoff
-                log.debug(f"CpTd6033 comm error (ret=1), attempt {attempt+1}/3, backing off")
-                _t.sleep(0.3 * (attempt + 1))
-                continue
-            # Other errors: give up
             log.warning(f"CpTd6033 BlockRequest failed: ret={ret}")
             return []
         if ret != 0:
-            log.warning(f"CpTd6033 rate-limited after 3 attempts; skipping this cycle")
+            log.warning(f"CpTd6033 still failing (ret={ret}) after 3 attempts; skipping this cycle")
             return []
         if obj.GetDibStatus() != 0:
             log.warning(f"CpTd6033 error: {obj.GetDibMsg1()}")

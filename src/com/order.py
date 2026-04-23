@@ -13,6 +13,11 @@ class CybosOrder:
         self._goods_code = goods_code
 
     def buy_limit(self, code: str, qty: int, price: int) -> dict:
+        # Guard against stale COM proxy: confirm connection is alive.
+        # If CYBOS was restarted/relogged, BlockRequest can hard-crash (access
+        # violation) instead of returning an error. Bail out cleanly.
+        if not self._conn.is_connected:
+            raise RuntimeError("CYBOS not connected — buy order aborted")
         self._conn.wait_if_limited(1)
         obj = win32com.client.Dispatch("CpTrade.CpTd0311")
         obj.SetInputValue(0, "2")
