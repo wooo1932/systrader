@@ -9,6 +9,7 @@ import {
   fetchLiveLogs,
   submitTelegramCode,
   fetchNewsFeed,
+  emergencySellAll,
 } from "../api/client";
 import type { WsMessage, SystemStatus, LogEntry, NewsFeedItem } from "../api/client";
 
@@ -56,16 +57,35 @@ export default function Dashboard() {
   const logEndRef = useRef<HTMLDivElement>(null);
   const [showCodeModal, setShowCodeModal] = useState(false);
   const [telegramCode, setTelegramCode] = useState("");
+  const [lastStatusAt, setLastStatusAt] = useState<number>(0);
+  const [, forceTick] = useState(0);
+  const newsScrollRef = useRef<HTMLDivElement>(null);
+  const tradesScrollRef = useRef<HTMLDivElement>(null);
+  const holdingsScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetchStatus().then(setStatus);
-    fetchNewsFeed().then(setNewsEvents);
-    const interval = setInterval(() => {
-      fetchStatus().then(setStatus);
-      fetchNewsFeed().then(setNewsEvents);
-    }, 3000);
-    return () => clearInterval(interval);
+    const refresh = () => {
+      fetchStatus().then((s) => { setStatus(s); setLastStatusAt(Date.now()); }).catch(() => {});
+      // API returns chronological (oldest-first); reverse to match WS prepend convention
+      // (storage is always newest-first; render reverse() shows oldest→newest top→bottom).
+      fetchNewsFeed().then((arr) => setNewsEvents([...arr].reverse())).catch(() => {});
+    };
+    refresh();
+    const interval = setInterval(refresh, 3000);
+    const tick = setInterval(() => forceTick((n) => n + 1), 1000);
+    // Page Visibility: immediately refresh when user returns to the tab (bypasses timer throttling)
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(interval);
+      clearInterval(tick);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
+
+  const serverHealthy = lastStatusAt > 0 && (Date.now() - lastStatusAt) < 10000;
 
   useEffect(() => {
     if (status.telegram_code_pending && !showCodeModal) {
@@ -78,10 +98,22 @@ export default function Dashboard() {
   }, [status.telegram_code_pending]);
 
   useEffect(() => {
-    fetchJson<Trade[]>("/trades?status=holding").then(setHoldings);
-    fetchJson<Trade[]>("/trades?status=done").then(setTodayTrades);
+    const today = () => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    };
+    const refreshTrades = () => {
+      fetchJson<Trade[]>("/trades?status=holding").then(setHoldings).catch(() => {});
+      fetchJson<Trade[]>(`/trades?status=done&date=${today()}`).then(setTodayTrades).catch(() => {});
+    };
+    refreshTrades();
+    // Periodic refresh catches cancelled/timeout updates that have no dedicated WS event
+    const tradesInterval = setInterval(refreshTrades, 5000);
     const ws = connectWebSocket((msg: WsMessage) => {
-      if (msg.type === "engine_status") fetchStatus().then(setStatus);
+      if (msg.type === "engine_status" || msg.type === "cybos_status") {
+        // Immediately reflect server-pushed status changes (no dependency on HTTP polling)
+        fetchStatus().then((s) => { setStatus(s); setLastStatusAt(Date.now()); }).catch(() => {});
+      }
       if (msg.type === "news_feed" || msg.type === "news_detected") {
         const d = msg.data as Record<string, string>;
         setNewsEvents((prev) => [
@@ -89,9 +121,9 @@ export default function Dashboard() {
           ...prev.slice(0, 199),
         ]);
       }
-      if (msg.type === "buy_filled" || msg.type === "sell_filled") {
-        fetchJson<Trade[]>("/trades?status=holding").then(setHoldings);
-        fetchJson<Trade[]>("/trades?status=done").then(setTodayTrades);
+      // Refresh on any worker state change (incl. screening/cancelled) or fill
+      if (msg.type === "buy_filled" || msg.type === "sell_filled" || msg.type === "worker_state") {
+        refreshTrades();
       }
       if (msg.type === "telegram_code_required") {
         setTelegramCode("");
@@ -101,37 +133,76 @@ export default function Dashboard() {
         setShowCodeModal(false);
       }
     });
-    return () => ws.close();
+    return () => { clearInterval(tradesInterval); ws.close(); };
   }, []);
 
   const logSeqRef = useRef(0);
   useEffect(() => {
-    const timer = setInterval(() => {
+    const fetchLogs = () => {
       fetchLiveLogs(logSeqRef.current).then(({ logs: newLogs, seq }) => {
         if (newLogs.length > 0) {
           setLogs((prev) => [...prev, ...newLogs].slice(-500));
           logSeqRef.current = seq;
         }
       }).catch(() => {});
-    }, 1000);
-    return () => clearInterval(timer);
+    };
+    const timer = setInterval(fetchLogs, 1000);
+    // Force immediate log fetch when tab becomes visible (bypasses Chrome's 1min throttle)
+    const onVisible = () => {
+      if (document.visibilityState === "visible") fetchLogs();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
 
+  // Auto-scroll news/trades/holdings panels to bottom when new items arrive
+  useEffect(() => {
+    if (newsScrollRef.current) {
+      newsScrollRef.current.scrollTop = newsScrollRef.current.scrollHeight;
+    }
+  }, [newsEvents.length]);
+  useEffect(() => {
+    if (tradesScrollRef.current) {
+      tradesScrollRef.current.scrollTop = tradesScrollRef.current.scrollHeight;
+    }
+  }, [todayTrades.length]);
+  useEffect(() => {
+    if (holdingsScrollRef.current) {
+      holdingsScrollRef.current.scrollTop = holdingsScrollRef.current.scrollHeight;
+    }
+  }, [holdings.length]);
+
   const handleStart = () => {
     startEngine().then(() => fetchStatus().then(setStatus));
   };
   const handleStop = () => stopEngine().then(() => fetchStatus().then(setStatus));
   const handleLaunch = () => launchCybos();
+  const handleEmergencySell = () => {
+    const n = holdings.length;
+    if (!window.confirm(
+      `긴급 전량 매도: 보유 ${n}종목 시장가 즉시 청산 + 엔진 정지합니다.\n계속하시겠습니까?`
+    )) return;
+    emergencySellAll().then((r) => {
+      alert(`긴급 매도 발동: ${r.count ?? 0}건 매도 주문 제출`);
+      fetchStatus().then(setStatus);
+    }).catch((e) => alert(`실패: ${e}`));
+  };
 
   const filteredLogs = logFilter === "ALL" ? logs : logs.filter((l) => l.level === logFilter);
   const wins = todayTrades.filter((t) => (t.pnl_amount ?? 0) > 0).length;
   const losses = todayTrades.filter((t) => (t.pnl_amount ?? 0) < 0).length;
   const totalPnl = todayTrades.reduce((s, t) => s + (t.pnl_amount ?? 0), 0);
   const winRate = todayTrades.length > 0 ? ((wins / todayTrades.length) * 100).toFixed(1) : "0.0";
+  const avgPnlPct = todayTrades.length > 0
+    ? (todayTrades.reduce((s, t) => s + (t.pnl_pct ?? 0), 0) / todayTrades.length) * 100
+    : 0;
 
   return (
     <div className="page">
@@ -149,6 +220,35 @@ export default function Dashboard() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
+          {/* Server health (heartbeat-based) */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "4px 10px",
+              borderRadius: 999,
+              background: serverHealthy ? "rgba(16,185,129,0.12)" : "rgba(239,68,68,0.12)",
+              border: `1px solid ${serverHealthy ? "rgba(16,185,129,0.4)" : "rgba(239,68,68,0.4)"}`,
+            }}
+          >
+            <div
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: "50%",
+                background: serverHealthy ? "var(--green)" : "var(--red)",
+                boxShadow: serverHealthy
+                  ? "0 0 10px rgba(16,185,129,0.7)"
+                  : "0 0 10px rgba(239,68,68,0.7)",
+                animation: serverHealthy ? "pulse 1.6s ease-in-out infinite" : "none",
+              }}
+            />
+            <span style={{ fontSize: 13, fontWeight: 700, color: serverHealthy ? "var(--green)" : "var(--red)" }}>
+              {serverHealthy ? "서버 정상" : "서버 응답없음"}
+            </span>
+          </div>
+
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div
               style={{
@@ -216,6 +316,15 @@ export default function Dashboard() {
           </button>
           <button className="btn btn-danger btn-sm" onClick={handleStop} disabled={!status.engine_running}>
             자동매매 중지
+          </button>
+          <button
+            className="btn btn-danger btn-sm"
+            onClick={handleEmergencySell}
+            disabled={holdings.length === 0}
+            title="보유 전량 시장가 매도 + 엔진 정지"
+            style={{ background: "#7f1d1d", fontWeight: 700 }}
+          >
+            🚨 긴급 전량매도
           </button>
         </div>
       </div>
@@ -337,6 +446,9 @@ export default function Dashboard() {
           <div className="label">손익</div>
           <div className="value" style={{ color: totalPnl >= 0 ? "var(--red)" : "var(--accent)" }}>
             {totalPnl >= 0 ? "+" : ""}{totalPnl.toLocaleString()}
+            <span style={{ fontSize: 13, fontWeight: 500, marginLeft: 6, opacity: 0.8 }}>
+              ({avgPnlPct >= 0 ? "+" : ""}{avgPnlPct.toFixed(2)}%)
+            </span>
           </div>
         </div>
       </div>
@@ -347,7 +459,7 @@ export default function Dashboard() {
           <span className="section-title">보유 종목</span>
           <span className="badge badge-green">{holdings.length}</span>
         </div>
-        <div style={{ height: 220, overflow: "auto" }}>
+        <div ref={holdingsScrollRef} style={{ height: 220, overflow: "auto" }}>
         <table style={{ tableLayout: "fixed" }}>
             <thead>
               <tr>
@@ -372,7 +484,7 @@ export default function Dashboard() {
                       {h.buy_qty?.toLocaleString() ?? "-"}
                     </td>
                     <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                      {h.buy_price?.toLocaleString() ?? "-"}
+                      {h.buy_price != null ? Math.round(h.buy_price).toLocaleString() : "-"}
                     </td>
                     <td style={{ textAlign: "right", fontWeight: 600, fontVariantNumeric: "tabular-nums", color: pnlColor }}>
                       {h.pnl_amount != null ? `${h.pnl_amount >= 0 ? "+" : ""}${h.pnl_amount.toLocaleString()}` : "-"}
@@ -394,7 +506,7 @@ export default function Dashboard() {
           <span className="section-title">뉴스 포착</span>
           <span className="badge badge-yellow">{newsEvents.length}</span>
         </div>
-        <div style={{ height: 330, overflow: "auto" }}>
+        <div ref={newsScrollRef} style={{ height: 330, overflow: "auto" }}>
           <table style={{ tableLayout: "fixed" }}>
             <thead>
               <tr>
@@ -410,7 +522,7 @@ export default function Dashboard() {
               {newsEvents.length === 0 ? (
                 <tr><td colSpan={6} style={{ color: "var(--text-muted)", textAlign: "center", padding: 20 }}>대기중...</td></tr>
               ) : (
-                newsEvents.map((n, i) => (
+                [...newsEvents].reverse().map((n, i) => (
                   <tr key={i}>
                     <td style={{ color: "var(--text-muted)", fontSize: 12, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{n.time || n.timestamp}</td>
                     <td style={{ color: "var(--text-secondary)", fontVariantNumeric: "tabular-nums" }}>{n.stock_code}</td>
@@ -437,6 +549,7 @@ export default function Dashboard() {
             <span className="section-title">오늘 거래 내역</span>
             <span className="badge badge-green">{todayTrades.length}건</span>
           </div>
+          <div ref={tradesScrollRef} style={{ maxHeight: 380, overflow: "auto" }}>
           <table>
             <thead>
               <tr>
@@ -454,7 +567,7 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {todayTrades.map((t) => {
+              {[...todayTrades].sort((a, b) => (a.id ?? 0) - (b.id ?? 0)).map((t) => {
                 const pnl = t.pnl_amount ?? 0;
                 const pnlColor = pnl > 0 ? "var(--red)" : pnl < 0 ? "var(--accent)" : "var(--text-secondary)";
                 return (
@@ -472,10 +585,10 @@ export default function Dashboard() {
                       </span>
                     </td>
                     <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                      {t.buy_price?.toLocaleString() ?? "-"}
+                      {t.buy_price != null ? Math.round(t.buy_price).toLocaleString() : "-"}
                     </td>
                     <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                      {t.sell_price?.toLocaleString() ?? "-"}
+                      {t.sell_price != null ? Math.round(t.sell_price).toLocaleString() : "-"}
                     </td>
                     <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", color: "var(--text-secondary)" }}>
                       {t.buy_qty?.toLocaleString() ?? "-"}
@@ -487,7 +600,7 @@ export default function Dashboard() {
                       {pnl !== 0 ? `${pnl >= 0 ? "+" : ""}${pnl.toLocaleString()}` : "-"}
                     </td>
                     <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", color: "var(--text-secondary)" }}>
-                      {t.highest_price?.toLocaleString() ?? "-"}
+                      {t.highest_price != null ? Math.round(t.highest_price).toLocaleString() : "-"}
                     </td>
                     <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", color: "var(--text-secondary)", fontSize: 12 }}>
                       {t.hold_seconds != null ? `${t.hold_seconds.toFixed(0)}s` : "-"}
@@ -500,6 +613,7 @@ export default function Dashboard() {
               })}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

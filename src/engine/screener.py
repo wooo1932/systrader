@@ -29,6 +29,7 @@ class Screener:
             return ScreenResult(False, "min_change_pct")
         if change_pct > self.max_change_pct:
             return ScreenResult(False, "max_change_pct")
-        if current_price >= upper_limit_price * 0.98:
-            return ScreenResult(False, "near_upper_limit")
+        if isinstance(upper_limit_price, (int, float)) and upper_limit_price > 0:
+            if current_price >= upper_limit_price * 0.98:
+                return ScreenResult(False, "near_upper_limit")
         return ScreenResult(True)

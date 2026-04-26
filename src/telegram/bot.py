@@ -49,4 +49,8 @@ class AlertBot:
         self.send(msg)
 
     def on_trade_done(self, data: dict) -> None:
-        pass
+        pnl = data.get('pnl_pct', 0) * 100
+        sign = "+" if pnl >= 0 else ""
+        msg = (f"[거래 완료] {data.get('name', '')} ({data.get('code', '')})\n"
+               f"수익률: {sign}{pnl:.2f}%")
+        self.send(msg)

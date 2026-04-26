@@ -60,6 +60,10 @@ export function stopEngine(): Promise<{ status: string }> {
   return postJson("/engine/stop");
 }
 
+export function emergencySellAll(): Promise<{ status: string; count?: number }> {
+  return postJson("/emergency/sell-all");
+}
+
 export function submitTelegramCode(code: string): Promise<{ status: string }> {
   return postJson("/telegram/auth-code", { code });
 }
